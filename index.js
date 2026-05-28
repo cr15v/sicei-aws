@@ -184,32 +184,52 @@ app.post('/alumnos/:id/session/login', async (req, res) => {
 
 // Buscar una sesión activa
 async function buscarSesion(sessionString, alumnoId) {
-    const res = await docClient.send({
-        middlewareStack: docClient.middlewareStack,
-        send: async () => {},
-        command: new PutCommand({}) 
-    }).catch(() => null); 
-
     const { ScanCommand } = require('@aws-sdk/lib-dynamodb');
-    const scanRes = await docClient.send(new ScanCommand({
-        TableName: 'sesiones-alumnos',
-        FilterExpression: 'sessionString = :ss AND alumnoId = :aid',
-        ExpressionAttributeValues: { ':ss': sessionString, ':aid': parseInt(alumnoId) }
-    }));
-    return scanRes.Items && scanRes.Items.length > 0 ? scanRes.Items[0] : null;
+    
+    try {
+        const scanRes = await docClient.send(new ScanCommand({
+            TableName: 'sesiones-alumnos',
+            FilterExpression: 'sessionString = :ss AND alumnoId = :aid',
+            ExpressionAttributeValues: { 
+                ':ss': sessionString, 
+                ':aid': parseInt(alumnoId) 
+            }
+        }));
+        
+        return scanRes.Items && scanRes.Items.length > 0 ? scanRes.Items[0] : null;
+    } catch (scanError) {
+        console.error("Error dentro del Scan de buscarSesion:", scanError);
+        return null;
+    }
 }
 
 // Verify -----------------
 app.post('/alumnos/:id/session/verify', async (req, res) => {
+    const alumnoId = req.params.id;
     const { sessionString } = req.body;
+
+    if (!sessionString) {
+        return res.status(400).json({ error: "Falta el sessionString" });
+    }
+
     try {
-        const sesion = await buscarSesion(sessionString, req.params.id);
-        if (sesion && sesion.active === true) {
-            return res.status(200).json({ active: true });
+        const sesion = await buscarSesion(sessionString, alumnoId);
+
+        if (!sesion) {
+            return res.status(400).json({ error: "Sesión no encontrada o no coincide con el alumno" });
         }
-        res.status(400).json({ error: "Sesión no válida o expirada" });
-    } catch (err) {
-        res.status(400).json({ error: "Bad Request" });
+
+        console.log("Datos encontrados en DynamoDB:", sesion);
+        
+        if (sesion.active === true) {
+            return res.status(200).json({ mensaje: "Sesión válida y activa" });
+        } else {
+            return res.status(400).json({ error: "La sesión ya ha expirado" });
+        }
+
+    } catch (error) {
+        console.error("Error en verify DynamoDB:", error);
+        return res.status(500).json({ error: "Error interno del servidor en DynamoDB" });
     }
 });
 
